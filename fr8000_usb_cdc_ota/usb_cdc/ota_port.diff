@@ -1,0 +1,98 @@
+--- SDK/ble_ota/ota.c
++++ usb_cdc/code/ota.c
+@@ -14,8 +14,7 @@
+ 
+ //#include "qspi.h"
+ //#include "co_utils.h"
+-#include "gatt_api.h"
+-#include "gap_api.h"
++#include "usb_ota_port.h"
+ 
+ #include "sys_utils.h"
+ #include "crc32.h"
+@@ -32,7 +31,7 @@
+ 
+ 
+ #ifdef OTA_CRC_CHECK
+-#include "os_timer.h"
++#include "usb_ota.h"
+ uint32_t Crc32CalByByte(int crc,uint8_t* ptr, int len);
+ uint8_t app_otas_crc_cal(uint32_t firmware_length,uint32_t new_bin_addr,uint32_t crc_data_t);
+ 
+@@ -54,7 +53,7 @@
+ static uint16_t ota_recving_expected_length = 0;
+ static uint8_t *ota_recving_buffer = NULL;
+ #ifdef OTA_CRC_CHECK
+-static os_timer_t os_timer_ota;
++
+ static uint32_t ota_addr_check,ota_addr_check_len = 0;
+ #endif
+ static uint8_t ota_state = 0;
+@@ -62,7 +61,7 @@
+ extern uint8_t app_boot_get_storage_type(void);
+ extern void app_boot_load_data(uint8_t *dest, uint32_t src, uint32_t len);
+ #ifdef OTA_CRC_CHECK
+-void os_timer_ota_cb(void *arg);
++void ota_timer_timeout(void);
+ #endif
+ 
+ __attribute__((section("ram_code"))) uint8_t app_get_ota_state(void)
+@@ -167,15 +166,14 @@
+ #ifdef OTA_CRC_CHECK
+ void __attribute__((weak)) ota_start(void)
+ {
+-    os_timer_init(&os_timer_ota,os_timer_ota_cb,NULL);
+-    os_timer_start(&os_timer_ota, OTA_TIMEOUT, 0);
++    usb_ota_timer_start(OTA_TIMEOUT);
+     co_printf("ota_start\r\n\r\n");
+ }
+ void __attribute__((weak)) ota_stop(ota_warning_type evt_id)
+ {
+     co_printf("ota_stop\r\n\r\n");
+-    os_timer_stop(&os_timer_ota);
+-    os_timer_destroy(&os_timer_ota);
++    usb_ota_timer_stop();
++    usb_ota_warning(evt_id);
+     ota_deinit(0);
+     ota_init(0);
+     switch (evt_id)
+@@ -191,10 +189,10 @@
+             break;
+     };
+ }
+-void os_timer_ota_cb(void *arg)
++void ota_timer_timeout(void)
+ {
+     ota_stop(OTA_TIMOUT);
+-    co_printf("os_timer_ota_cb\r\n");
++    co_printf("ota_timer_timeout\r\n");
+ }
+ #endif
+ void app_otas_recv_data(uint8_t conidx,uint8_t *p_data,uint16_t len)
+@@ -222,8 +220,7 @@
+     co_printf("app_otas_recv_data[%d]: %d, %d. %d\r\n",at_data_idx, gatt_get_mtu(conidx), len, cmd_hdr->cmd.write_data.length);
+     show_reg(p_data,sizeof(struct app_ota_cmd_hdr_t),1);
+ #ifdef OTA_CRC_CHECK
+-    os_timer_stop(&os_timer_ota);
+-    os_timer_start(&os_timer_ota, OTA_TIMEOUT, 0);
++    usb_ota_timer_start(OTA_TIMEOUT);
+ #endif
+     at_data_idx++;
+ 
+@@ -438,14 +435,14 @@
+                     co_printf("crc32 check fail\r\n\r\n");
+                     os_free(req);
+                     ota_stop(OTA_CHECK_FAIL);
+-                    platform_reset(0);
++                    usb_ota_reboot(0);
+                 }
+ #endif  
+             }
+             app_set_ota_state(0);
+             //uart_finish_transfers(UART1_BASE);
+ 
+-            platform_reset(0);
++            usb_ota_reboot(0);
+             break;
+         default:
+             rsp_hdr->result = OTA_RSP_UNKNOWN_CMD;
